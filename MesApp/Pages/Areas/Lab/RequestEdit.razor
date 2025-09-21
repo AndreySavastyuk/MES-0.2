@@ -20,60 +20,83 @@
         </div>
     </div>
 
-    <div class="card">
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">Испытания</label>
-                <InputText @bind-Value="request.Tests" class="form-control" />
-            </div>
+    <EditForm Model="@request" OnValidSubmit="SaveChangesAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
 
-            <div class="mb-3">
-                <div class="form-check">
-                    <InputCheckbox @bind-Value="request.External" class="form-check-input" id="external"
-                           disabled="@(request.Status != "New")" />
-                    <label class="form-check-label" for="external">
-                        Внешняя лаборатория
-                    </label>
-                </div>
-            </div>
-
-            @if (request.External)
-            {
+        <div class="card">
+            <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">Название внешней лаборатории</label>
-                    <InputText @bind-Value="request.ExternalLabName" class="form-control" />
+                    <label class="form-label">Испытания</label>
+                    <InputText @bind-Value="request.Tests" class="form-control" />
                 </div>
-            }
 
-            @if (!request.External)
-            {
-                @if (request.Status == "New")
-                {
-                    <button class="btn btn-success" @onclick="CompleteInternal">
-                        Завершить испытание
-                    </button>
-                }
-            }
-            else
-            {
-                @if (request.Status == "New")
-                {
-                    <button class="btn btn-warning" @onclick="SendToExternal">
-                        Отправлено во внешнюю
-                    </button>
-                }
-                else if (request.Status == "Sent")
-                {
-                    <button class="btn btn-primary" @onclick="() => showResultDialog = true">
-                        Результаты получены
-                    </button>
-                }
-            }
+                <div class="mb-3">
+                    <div class="form-check">
+                        <InputCheckbox @bind-Value="request.External" class="form-check-input" id="external"
+                               disabled="@(request.Status != "New")" />
+                        <label class="form-check-label" for="external">
+                            Внешняя лаборатория
+                        </label>
+                    </div>
+                </div>
 
-            <button type="button" class="btn btn-secondary ms-2" @onclick="SaveChanges">Сохранить изменения</button>
-            <a href="/lab/requests" class="btn btn-light ms-2">Назад</a>
+                @if (request.External)
+                {
+                    <div class="mb-3">
+                        <label class="form-label">Название внешней лаборатории</label>
+                        <InputText @bind-Value="request.ExternalLabName" class="form-control" />
+                    </div>
+                }
+
+                @if (!request.External)
+                {
+                    @if (request.Status == "New")
+                    {
+                        <button type="button" class="btn btn-success" @onclick="CompleteInternal" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Завершить испытание
+                        </button>
+                    }
+                }
+                else
+                {
+                    @if (request.Status == "New")
+                    {
+                        <button type="button" class="btn btn-warning" @onclick="SendToExternal" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Отправлено во внешнюю
+                        </button>
+                    }
+                    else if (request.Status == "Sent")
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="() => showResultDialog = true" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Результаты получены
+                        </button>
+                    }
+                }
+
+                <button type="submit" class="btn btn-secondary ms-2" disabled="@isProcessing">
+                    @if (isProcessing)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                    }
+                    Сохранить изменения
+                </button>
+                <a href="/lab/requests" class="btn btn-light ms-2">Назад</a>
+            </div>
         </div>
-    </div>
+    </EditForm>
 
     @if (showResultDialog)
     {
@@ -168,46 +191,70 @@ else
         file = e.File;
     }
 
-    private async Task SaveChanges()
+    private async Task SaveChangesAsync()
     {
-        using var db = DbFactory.CreateDbContext();
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/lab/requests");
+        isProcessing = true;
+        try
+        {
+            using var db = DbFactory.CreateDbContext();
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/lab/requests");
+        }
+        finally
+        {
+            isProcessing = false;
+        }
     }
 
     private async Task CompleteInternal()
     {
         if (request == null) return;
 
-        var result = new LabTestResult
+        isProcessing = true;
+        try
         {
-            LabTestRequestId = request.Id,
-            Pass = true,
-            ProtocolNo = $"P-{request.Id}-{DateTime.Now:yyyyMMdd}",
-            CompletedAt = DateTime.Now
-        };
+            var result = new LabTestResult
+            {
+                LabTestRequestId = request.Id,
+                Pass = true,
+                ProtocolNo = $"P-{request.Id}-{DateTime.Now:yyyyMMdd}",
+                CompletedAt = DateTime.Now
+            };
 
-        using var db = DbFactory.CreateDbContext();
-        db.LabTestResults.Add(result);
-        request.Status = "Completed";
+            using var db = DbFactory.CreateDbContext();
+            db.LabTestResults.Add(result);
+            request.Status = "Completed";
 
-        // Опционально меняем статус приёмки
-        if (request.Receipt.Status == ReceiptStatus.OnLab)
-        {
-            request.Receipt.Status = ReceiptStatus.Accepted;
+            // Опционально меняем статус приёмки
+            if (request.Receipt.Status == ReceiptStatus.OnLab)
+            {
+                request.Receipt.Status = ReceiptStatus.Accepted;
+            }
+
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/lab/requests");
         }
-
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/lab/requests");
+        finally
+        {
+            isProcessing = false;
+        }
     }
 
     private async Task SendToExternal()
     {
         if (request == null) return;
 
-        request.Status = "Sent";
-        using var db = DbFactory.CreateDbContext();
-        await db.SaveChangesAsync();
+        isProcessing = true;
+        try
+        {
+            request.Status = "Sent";
+            using var db = DbFactory.CreateDbContext();
+            await db.SaveChangesAsync();
+        }
+        finally
+        {
+            isProcessing = false;
+        }
     }
 
     private async Task SaveAsync()
