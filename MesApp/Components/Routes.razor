@@ -1,0 +1,22 @@
+<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <ErrorBoundary>
+            <ChildContent>
+                <RouteView RouteData="@routeData" DefaultLayout="@typeof(MesApp.Components.Layout.MainLayout)" />
+            </ChildContent>
+            <ErrorContent>
+                <div class="alert alert-danger m-3">
+                    Произошла ошибка. Попробуйте обновить страницу.
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(MesApp.Components.Layout.MainLayout)">
+            <div class="container py-4">
+                <h5>Страница не найдена</h5>
+                <a href="/">На главную</a>
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>

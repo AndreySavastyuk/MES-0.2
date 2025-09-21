@@ -1,0 +1,160 @@
+@page "/warehouse/receipts"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using MesApp.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject CurrentUser CurrentUser
+@inject NavigationManager Navigation
+
+<h3>Журнал приёмок</h3>
+
+<div class="row mb-3">
+    <div class="col-md-4">
+        <label class="form-label">Фильтр по статусу</label>
+        <InputSelect @bind-Value="statusFilter" @bind-Value:after="LoadReceipts" class="form-select">
+            <option value="">Все</option>
+            <option value="@ReceiptStatus.New">Новые</option>
+            <option value="@ReceiptStatus.OnQc">На контроле</option>
+            <option value="@ReceiptStatus.OnLab">В лаборатории</option>
+            <option value="@ReceiptStatus.Accepted">Принято</option>
+            <option value="@ReceiptStatus.Rejected">Отклонено</option>
+        </InputSelect>
+    </div>
+    <div class="col-md-4">
+        <label class="form-label">Поиск</label>
+        <InputText @bind-Value="searchText" @bind-Value:after="LoadReceipts" class="form-control"
+               placeholder="Поставщик, материал, сертификат...">
+        </InputText>
+    </div>
+    <div class="col-md-4 d-flex align-items-end">
+        <a href="/warehouse/new-receipt" class="btn btn-primary">Новая приёмка</a>
+    </div>
+</div>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>№</th>
+            <th>Дата</th>
+            <th>Поставщик</th>
+            <th>Материал</th>
+            <th>Кол-во</th>
+            <th>Статус</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (receipts.Any())
+        {
+            @foreach (var receipt in receipts)
+            {
+                <tr>
+                    <td>@receipt.Id</td>
+                    <td>@receipt.ReceivedAt.ToString("dd.MM.yyyy")</td>
+                    <td>@(receipt.Supplier?.Name ?? "-")</td>
+                    <td>@receipt.Item.Name</td>
+                    <td>@receipt.Qty @receipt.Unit</td>
+                    <td>
+                        <span class="badge @GetStatusBadgeClass(receipt.Status)">
+                            @GetStatusDisplay(receipt.Status)
+                        </span>
+                    </td>
+                    <td>
+                        @if (receipt.Status == ReceiptStatus.New)
+                        {
+                            <button class="btn btn-sm btn-warning" @onclick="() => SendToQc(receipt)">
+                                В ОТК
+                            </button>
+                        }
+                        <a href="/warehouse/label/@receipt.Id" class="btn btn-sm btn-info">
+                            Бирка
+                        </a>
+                        @if (!string.IsNullOrEmpty(receipt.CertFilePath))
+                        {
+                            <a href="@receipt.CertFilePath" target="_blank" class="btn btn-sm btn-secondary">
+                                PDF
+                            </a>
+                        }
+                    </td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="7" class="text-center">Приёмки не найдены</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<MaterialReceipt> receipts = new();
+    private string statusFilter = "";
+    private string searchText = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadReceipts();
+    }
+
+    private async Task LoadReceipts()
+    {
+        using var db = DbFactory.CreateDbContext();
+        var query = db.MaterialReceipts
+            .Include(r => r.Supplier)
+            .Include(r => r.Item)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(statusFilter))
+        {
+            if (Enum.TryParse<ReceiptStatus>(statusFilter, out var status))
+            {
+                query = query.Where(r => r.Status == status);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            var search = searchText.ToLower();
+            query = query.Where(r =>
+                (r.Supplier != null && r.Supplier.Name.ToLower().Contains(search)) ||
+                r.Item.Name.ToLower().Contains(search) ||
+                (r.CertNumber != null && r.CertNumber.ToLower().Contains(search)) ||
+                (r.HeatNumber != null && r.HeatNumber.ToLower().Contains(search)));
+        }
+
+        receipts = await query.OrderByDescending(r => r.Id).ToListAsync();
+    }
+
+    private async Task SendToQc(MaterialReceipt receipt)
+    {
+        using var db = DbFactory.CreateDbContext();
+        receipt.Status = ReceiptStatus.OnQc;
+        await db.SaveChangesAsync();
+        await LoadReceipts();
+    }
+
+    private string GetStatusDisplay(ReceiptStatus status) => status switch
+    {
+        ReceiptStatus.New => "Новая",
+        ReceiptStatus.OnQc => "ОТК",
+        ReceiptStatus.OnLab => "ЦЗЛ",
+        ReceiptStatus.Accepted => "Принято",
+        ReceiptStatus.Rejected => "Отклонено",
+        _ => status.ToString()
+    };
+
+    private string GetStatusBadgeClass(ReceiptStatus status) => status switch
+    {
+        ReceiptStatus.New => "bg-primary",
+        ReceiptStatus.OnQc => "bg-warning text-dark",
+        ReceiptStatus.OnLab => "bg-info",
+        ReceiptStatus.Accepted => "bg-success",
+        ReceiptStatus.Rejected => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

@@ -1,0 +1,62 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (uncomment the next line if you want to include the local dotnet tools)
+# .tools/
+
+# dotnet
+**/bin/
+**/obj/
+**/out/
+*.user
+*.tmp
+*.temp
+
+# Visual Studio
+.vs/
+.vscode/
+
+# Rider
+.idea/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Logs
+*.log
+dotnet-run.log
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Certificates
+*.pfx
+*.cer
+
+# Appsettings secrets
+appsettings.*.json
+
+# Files
+MesApp/wwwroot/files/

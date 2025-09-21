@@ -1,0 +1,185 @@
+@page "/warehouse/new-receipt"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using MesApp.Services
+@using MesApp.ViewModels
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject CurrentUser CurrentUser
+@inject NavigationManager Navigation
+@inject IWebHostEnvironment Environment
+@inject NotificationService NotificationService
+
+<h3>Новая приёмка материалов</h3>
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        @successMessage
+        <button type="button" class="btn-close" @onclick="() => successMessage = string.Empty"></button>
+    </div>
+}
+
+<EditForm Model="@vm" OnValidSubmit="SaveAsync">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Поставщик</label>
+            <InputSelect @bind-Value="vm.SupplierId" class="form-select">
+                <option value="">-- Выберите --</option>
+                @foreach (var supplier in suppliers)
+                {
+                    <option value="@supplier.Id">@supplier.Name</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Номенклатура *</label>
+            <InputSelect @bind-Value="vm.ItemId" class="form-select">
+                <option value="0">-- Выберите --</option>
+                @foreach (var item in items)
+                {
+                    <option value="@item.Id">@item.Name</option>
+                }
+            </InputSelect>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Количество *</label>
+            <InputNumber @bind-Value="vm.Qty" class="form-control" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Единица измерения *</label>
+            <InputText @bind-Value="vm.Unit" class="form-control" />
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <label class="form-label">№ сертификата</label>
+            <InputText @bind-Value="vm.CertNumber" class="form-control" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">№ плавки</label>
+            <InputText @bind-Value="vm.HeatNumber" class="form-control" />
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Марка</label>
+            <InputText @bind-Value="vm.Grade" class="form-control" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Размер</label>
+            <InputText @bind-Value="vm.Size" class="form-control" />
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Сертификат PDF</label>
+        <InputFile OnChange="@LoadFile" class="form-control" accept=".pdf" />
+        @if (!string.IsNullOrEmpty(fileName))
+        {
+            <small class="text-muted">Файл: @fileName</small>
+        }
+    </div>
+
+    <div class="mb-3">
+        <button type="submit" class="btn btn-primary" disabled="@isProcessing">
+            @if (isProcessing)
+            {
+                <span class="spinner-border spinner-border-sm me-2"></span>
+            }
+            Сохранить
+        </button>
+        <button type="button" class="btn btn-secondary" @onclick="ClearForm">Очистить</button>
+    </div>
+</EditForm>
+
+@code {
+    private NewReceiptViewModel vm = new();
+    private List<BusinessPartner> suppliers = new();
+    private List<Item> items = new();
+    private IBrowserFile? file;
+    private string fileName = "";
+    private string successMessage = "";
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db1 = DbFactory.CreateDbContext();
+        suppliers = await db1.BusinessPartners.Where(b => b.Role == "SUPPLIER").ToListAsync();
+        using var db2 = DbFactory.CreateDbContext();
+        items = await db2.Items.ToListAsync();
+        vm.Unit = "кг";
+    }
+
+    private void LoadFile(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+        fileName = e.File.Name;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (vm.ItemId == null || vm.ItemId == 0)
+        {
+            return; // Не сохранять, если материал не выбран
+        }
+
+        isProcessing = true;
+
+        var receipt = new MaterialReceipt
+        {
+            ItemId = vm.ItemId.Value, // Теперь безопасно
+            SupplierId = vm.SupplierId == 0 ? null : vm.SupplierId,
+            Qty = vm.Qty,
+            Unit = vm.Unit,
+            CertNumber = vm.CertNumber,
+            HeatNumber = vm.HeatNumber,
+            Grade = vm.Grade,
+            Size = vm.Size,
+            Status = ReceiptStatus.New,
+            ReceivedAt = DateTime.Now,
+            CreatedBy = CurrentUser.Name
+        };
+
+        if (file != null)
+        {
+            var uploadsFolder = Path.Combine(Environment.WebRootPath, "files", "certs");
+            Directory.CreateDirectory(uploadsFolder);
+
+            var uniqueFileName = $"{Guid.NewGuid()}.pdf";
+            var filePath = Path.Combine(uploadsFolder, uniqueFileName);
+
+            await using var stream = new FileStream(filePath, FileMode.Create);
+            await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(stream);
+
+            receipt.CertFilePath = $"/files/certs/{uniqueFileName}";
+        }
+
+        using var db = DbFactory.CreateDbContext();
+        db.MaterialReceipts.Add(receipt);
+        await db.SaveChangesAsync();
+
+        NotificationService.ShowSuccess($"Приёмка №{receipt.Id} создана успешно");
+        successMessage = $"Приёмка №{receipt.Id} создана";
+
+        ClearForm();
+        isProcessing = false;
+    }
+
+    private void ClearForm()
+    {
+        vm = new NewReceiptViewModel { Unit = "кг" };
+        file = null;
+        fileName = "";
+    }
+}

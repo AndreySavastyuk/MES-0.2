@@ -1,0 +1,74 @@
+@page "/qc/incoming"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<h3>Входной контроль ОТК</h3>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>№</th>
+            <th>Материал</th>
+            <th>Сертификат</th>
+            <th>Поставщик</th>
+            <th>Дата</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (receipts.Any())
+        {
+            @foreach (var receipt in receipts)
+            {
+                <tr>
+                    <td>@receipt.Id</td>
+                    <td>@receipt.Item.Name</td>
+                    <td>
+                        @if (!string.IsNullOrEmpty(receipt.CertFilePath))
+                        {
+                            <a href="@receipt.CertFilePath" target="_blank" class="btn btn-sm btn-light" title="Открыть сертификат">
+                                👁️
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="text-muted">-</span>
+                        }
+                    </td>
+                    <td>@(receipt.Supplier?.Name ?? "-")</td>
+                    <td>@receipt.ReceivedAt.ToString("dd.MM.yyyy")</td>
+                    <td>
+                        <a href="/qc/inspect?id=@receipt.Id" class="btn btn-sm btn-warning">
+                            Инспектировать
+                        </a>
+                    </td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="6" class="text-center text-muted">Нет материалов для контроля</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<MaterialReceipt> receipts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = DbFactory.CreateDbContext();
+        receipts = await db.MaterialReceipts
+            .Include(r => r.Item)
+            .Include(r => r.Supplier)
+            .Where(r => r.Status == ReceiptStatus.OnQc)
+            .OrderBy(r => r.ReceivedAt)
+            .ToListAsync();
+    }
+}

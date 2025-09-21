@@ -1,0 +1,119 @@
+@page "/warehouse/label/{id:int}"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<style>
+    @@media print {
+        .no-print { display: none; }
+        body { margin: 0; }
+    }
+    .label-box {
+        border: 2px solid black;
+        padding: 20px;
+        width: 400px;
+        margin: 20px auto;
+        font-family: monospace;
+    }
+    .qr-placeholder {
+        border: 1px dashed #999;
+        width: 100px;
+        height: 100px;
+        display: inline-block;
+        text-align: center;
+        line-height: 100px;
+        font-size: 12px;
+    }
+</style>
+
+<div class="no-print mb-3">
+    <a href="/warehouse/receipts" class="btn btn-secondary">← Назад</a>
+    <button onclick="window.print()" class="btn btn-primary">Печать</button>
+</div>
+
+@if (receipt != null)
+{
+    <div class="label-box">
+        <h3 style="text-align: center; margin: 0 0 20px 0;">БИРКА ПРИЁМКИ</h3>
+
+        <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+            <div>
+                <strong>№ @receipt.Id</strong><br>
+                @receipt.ReceivedAt.ToString("dd.MM.yyyy")
+            </div>
+            <div class="qr-placeholder">
+                QR: @receipt.Id
+            </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <td style="padding: 5px 0;"><strong>Материал:</strong></td>
+                <td>@receipt.Item.Name</td>
+            </tr>
+            @if (receipt.Supplier != null)
+            {
+                <tr>
+                    <td style="padding: 5px 0;"><strong>Поставщик:</strong></td>
+                    <td>@receipt.Supplier.Name</td>
+                </tr>
+            }
+            <tr>
+                <td style="padding: 5px 0;"><strong>Количество:</strong></td>
+                <td>@receipt.Qty @receipt.Unit</td>
+            </tr>
+            @if (!string.IsNullOrEmpty(receipt.HeatNumber))
+            {
+                <tr>
+                    <td style="padding: 5px 0;"><strong>Плавка:</strong></td>
+                    <td>@receipt.HeatNumber</td>
+                </tr>
+            }
+            @if (!string.IsNullOrEmpty(receipt.Grade))
+            {
+                <tr>
+                    <td style="padding: 5px 0;"><strong>Марка:</strong></td>
+                    <td>@receipt.Grade</td>
+                </tr>
+            }
+            @if (!string.IsNullOrEmpty(receipt.Size))
+            {
+                <tr>
+                    <td style="padding: 5px 0;"><strong>Размер:</strong></td>
+                    <td>@receipt.Size</td>
+                </tr>
+            }
+            @if (!string.IsNullOrEmpty(receipt.CertNumber))
+            {
+                <tr>
+                    <td style="padding: 5px 0;"><strong>Сертификат:</strong></td>
+                    <td>@receipt.CertNumber</td>
+                </tr>
+            }
+        </table>
+
+        <div style="margin-top: 20px; border-top: 1px solid black; padding-top: 10px;">
+            <small>Принял: @receipt.CreatedBy</small>
+        </div>
+    </div>
+}
+else
+{
+    <div class="alert alert-warning">Приёмка не найдена</div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private MaterialReceipt? receipt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = DbFactory.CreateDbContext();
+        receipt = await db.MaterialReceipts
+            .Include(r => r.Item)
+            .Include(r => r.Supplier)
+            .FirstOrDefaultAsync(r => r.Id == Id);
+    }
+}

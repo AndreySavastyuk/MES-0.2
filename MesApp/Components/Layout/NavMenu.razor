@@ -1,0 +1,35 @@
+@using MesApp.Services
+@inject CurrentUser CurrentUser
+
+@switch (CurrentUser.Role)
+{
+    case "WAREHOUSE":
+        <NavLink class="list-group-item list-group-item-action" href="/warehouse/new-receipt" Match="NavLinkMatch.Prefix">
+            Новая приёмка
+        </NavLink>
+        <NavLink class="list-group-item list-group-item-action" href="/warehouse/receipts" Match="NavLinkMatch.Prefix">
+            Журнал приёмок
+        </NavLink>
+        <NavLink class="list-group-item list-group-item-action" href="/warehouse/stocks" Match="NavLinkMatch.Prefix">
+            Остатки
+        </NavLink>
+        break;
+
+    case "QC":
+        <NavLink class="list-group-item list-group-item-action" href="/qc/incoming" Match="NavLinkMatch.Prefix">
+            Входной контроль
+        </NavLink>
+        break;
+
+    case "LAB":
+        <NavLink class="list-group-item list-group-item-action" href="/lab/requests" Match="NavLinkMatch.Prefix">
+            Заявки на испытания
+        </NavLink>
+        break;
+
+    case "OPP":
+        <NavLink class="list-group-item list-group-item-action" href="/opp/jobs" Match="NavLinkMatch.Prefix">
+            Задачи ОПП
+        </NavLink>
+        break;
+}

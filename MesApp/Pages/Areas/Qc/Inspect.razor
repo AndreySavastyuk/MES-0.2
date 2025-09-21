@@ -1,0 +1,191 @@
+@page "/qc/inspect"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using MesApp.Services
+@using MesApp.ViewModels
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject CurrentUser CurrentUser
+@inject NavigationManager Navigation
+@inject NotificationService NotificationService
+
+<h3>Инспекция ОТК</h3>
+
+@if (receipt != null)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Приёмка №@receipt.Id</h5>
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>Материал:</strong> @receipt.Item.Name</p>
+                    <p><strong>Поставщик:</strong> @(receipt.Supplier?.Name ?? "-")</p>
+                    <p><strong>Количество:</strong> @receipt.Qty @receipt.Unit</p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Дата приёмки:</strong> @receipt.ReceivedAt.ToString("dd.MM.yyyy")</p>
+                    <p><strong>№ сертификата:</strong> @(receipt.CertNumber ?? "-")</p>
+                    <p><strong>№ плавки:</strong> @(receipt.HeatNumber ?? "-")</p>
+                    <p><strong>Марка:</strong> @(receipt.Grade ?? "-")</p>
+                    <p><strong>Размер:</strong> @(receipt.Size ?? "-")</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <EditForm Model="@vm" OnValidSubmit="SaveAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Решение ОТК</h5>
+
+                <div class="mb-3">
+                    <div class="form-check">
+                        <InputCheckbox @bind-Value="vm.RequiresUltrasonic" class="form-check-input" id="requiresUltrasonic" />
+                        <label class="form-check-label" for="requiresUltrasonic">
+                            Требуется ультразвуковой контроль
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <InputCheckbox @bind-Value="vm.RequiresPpsd" class="form-check-input" id="requiresPpsd" />
+                        <label class="form-check-label" for="requiresPpsd">
+                            Требуется ППСД
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Решение:</label>
+                    <InputRadioGroup @bind-Value="vm.Decision">
+                        <div class="form-check">
+                            <InputRadio Value="Decision.Allow" class="form-check-input" id="decisionAccept" />
+                            <label class="form-check-label" for="decisionAccept">
+                                Принять
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <InputRadio Value="Decision.Reject" class="form-check-input" id="decisionReject" />
+                            <label class="form-check-label" for="decisionReject">
+                                Отклонить
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <InputRadio Value="Decision.Rework" class="form-check-input" id="decisionRework" />
+                            <label class="form-check-label" for="decisionRework">
+                                Доработка
+                            </label>
+                        </div>
+                    </InputRadioGroup>
+                </div>
+
+                <div class="mb-3">
+                    <div class="form-check">
+                        <InputCheckbox @bind-Value="vm.ToLabSelected" class="form-check-input" id="decisionToLab" />
+                        <label class="form-check-label" for="decisionToLab">
+                            На лабораторию
+                        </label>
+                    </div>
+                </div>
+
+                @if (vm.ToLabSelected)
+                {
+                    <div class="mb-3">
+                        <label class="form-label">Испытания:</label>
+                        <InputText @bind-Value="vm.LabTests" class="form-control" placeholder="CHEM,HARDNESS,UT" />
+                    </div>
+                }
+
+                <div class="mb-3">
+                    <label class="form-label">Замечания:</label>
+                    <InputTextArea @bind-Value="vm.Remarks" class="form-control" rows="3" />
+                </div>
+
+                <button type="submit" class="btn btn-primary" disabled="@isProcessing">
+                    @if (isProcessing)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                    }
+                    Сохранить
+                </button>
+                <button type="button" class="btn btn-secondary" @onclick="() => Navigation.NavigateTo(\"/qc/incoming\")">Отмена</button>
+            </div>
+        </div>
+    </EditForm>
+}
+else
+{
+    <div class="alert alert-warning">Приёмка не найдена</div>
+}
+
+@code {
+    [SupplyParameterFromQuery] public int Id { get; set; }
+
+    private MaterialReceipt? receipt;
+    private QcInspectViewModel vm = new();
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = DbFactory.CreateDbContext();
+        receipt = await db.MaterialReceipts
+            .Include(r => r.Item)
+            .Include(r => r.Supplier)
+            .FirstOrDefaultAsync(r => r.Id == Id);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (receipt == null || (!vm.Decision.HasValue && !vm.ToLabSelected))
+            return;
+
+        isProcessing = true;
+
+        var inspection = new QcInspection
+        {
+            MaterialReceiptId = receipt.Id,
+            RequiresUltrasonic = vm.RequiresUltrasonic,
+            RequiresPpsd = vm.RequiresPpsd,
+            Stage = QcStage.Incoming,
+            FinalDecision = vm.Decision,
+            Remarks = vm.Remarks,
+            CreatedAt = DateTime.Now,
+            Inspector = CurrentUser.Name
+        };
+
+        using var db = DbFactory.CreateDbContext();
+        db.QcInspections.Add(inspection);
+
+        if (vm.ToLabSelected)
+        {
+            var labRequest = new LabTestRequest
+            {
+                MaterialReceiptId = receipt.Id,
+                External = false,
+                Tests = vm.LabTests,
+                Status = "New",
+                CreatedAt = DateTime.Now,
+                RequestedBy = CurrentUser.Name
+            };
+            db.LabTestRequests.Add(labRequest);
+            receipt.Status = ReceiptStatus.OnLab;
+            NotificationService.ShowInfo($"Заявка на лабораторные испытания создана для {receipt.Item.Name}");
+        }
+        else if (vm.Decision == Decision.Allow)
+        {
+            receipt.Status = ReceiptStatus.Accepted;
+            NotificationService.ShowSuccess($"{receipt.Item.Name} принят на склад");
+        }
+        else if (vm.Decision == Decision.Reject)
+        {
+            receipt.Status = ReceiptStatus.Rejected;
+            NotificationService.ShowWarning($"{receipt.Item.Name} отклонён");
+        }
+
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/qc/incoming");
+    }
+}

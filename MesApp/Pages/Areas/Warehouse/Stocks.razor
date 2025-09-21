@@ -1,0 +1,201 @@
+@page "/warehouse/stocks"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using MesApp.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject CurrentUser CurrentUser
+
+<h3>Складские остатки</h3>
+
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Сырьё (RAW)</h5>
+                <h3 class="text-primary">@rawTotal кг</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Полуфабрикаты (SEMI)</h5>
+                <h3 class="text-warning">@semiTotal шт</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Готовая продукция (FG)</h5>
+                <h3 class="text-success">@fgTotal шт</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h4>Принятые материалы</h4>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>№</th>
+            <th>Материал</th>
+            <th>Количество</th>
+            <th>Выделено</th>
+            <th>Доступно</th>
+            <th>Поставщик</th>
+            <th>Дата</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (acceptedReceipts.Any())
+        {
+            @foreach (var receipt in acceptedReceipts)
+            {
+                var available = receipt.Qty - receipt.AllocatedQty;
+                <tr>
+                    <td>@receipt.Id</td>
+                    <td>@receipt.Item.Name</td>
+                    <td>@receipt.Qty @receipt.Unit</td>
+                    <td>@receipt.AllocatedQty @receipt.Unit</td>
+                    <td>
+                        <strong class="@(available > 0 ? "text-success" : "text-muted")">
+                            @available @receipt.Unit
+                        </strong>
+                    </td>
+                    <td>@(receipt.Supplier?.Name ?? "-")</td>
+                    <td>@receipt.ReceivedAt.ToString("dd.MM.yyyy")</td>
+                    <td>
+                        @if (available > 0)
+                        {
+                            <button class="btn btn-sm btn-primary" @onclick="() => OpenIssueDialog(receipt)">
+                                Выдать в производство
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="text-muted">Выдано полностью</span>
+                        }
+                    </td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="8" class="text-center text-muted">Нет принятых материалов</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (showIssueDialog && selectedReceipt != null)
+{
+    <div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Выдача в производство</h5>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Материал:</strong> @selectedReceipt.Item.Name</p>
+                    <p><strong>Доступно:</strong> @(selectedReceipt.Qty - selectedReceipt.AllocatedQty) @selectedReceipt.Unit</p>
+                    <div class="mb-3">
+                        <label class="form-label">Количество для выдачи</label>
+                        <InputNumber @bind-Value="issueQty" class="form-control"
+                               max="@(selectedReceipt.Qty - selectedReceipt.AllocatedQty)" min="0.01" step="0.01" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" @onclick="IssueToProduction"
+                            disabled="@(issueQty <= 0 || issueQty > (selectedReceipt.Qty - selectedReceipt.AllocatedQty))">
+                        Выдать
+                    </button>
+                    <button class="btn btn-secondary" @onclick="CloseIssueDialog">Отмена</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<MaterialReceipt> acceptedReceipts = new();
+    private decimal rawTotal = 0;
+    private decimal semiTotal = 0;
+    private decimal fgTotal = 0;
+
+    private bool showIssueDialog = false;
+    private MaterialReceipt? selectedReceipt;
+    private decimal issueQty = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        acceptedReceipts = await db.MaterialReceipts
+            .Include(r => r.Item)
+            .Include(r => r.Supplier)
+            .Where(r => r.Status == ReceiptStatus.Accepted)
+            .OrderByDescending(r => r.ReceivedAt)
+            .ToListAsync();
+
+        // Подсчёт агрегатов по типам материалов
+        var aggregates = await db.MaterialReceipts
+            .Include(r => r.Item)
+            .Where(r => r.Status == ReceiptStatus.Accepted)
+            .GroupBy(r => r.Item.Type)
+            .Select(g => new { Type = g.Key, Total = g.Sum(r => r.Qty - r.AllocatedQty) })
+            .ToListAsync();
+
+        rawTotal = aggregates.FirstOrDefault(a => a.Type == ItemType.RAW)?.Total ?? 0;
+        semiTotal = aggregates.FirstOrDefault(a => a.Type == ItemType.SEMI)?.Total ?? 0;
+        fgTotal = aggregates.FirstOrDefault(a => a.Type == ItemType.FG)?.Total ?? 0;
+    }
+
+    private void OpenIssueDialog(MaterialReceipt receipt)
+    {
+        selectedReceipt = receipt;
+        issueQty = Math.Min(1, receipt.Qty - receipt.AllocatedQty);
+        showIssueDialog = true;
+    }
+
+    private void CloseIssueDialog()
+    {
+        showIssueDialog = false;
+        selectedReceipt = null;
+        issueQty = 0;
+    }
+
+    private async Task IssueToProduction()
+    {
+        if (selectedReceipt == null || issueQty <= 0) return;
+
+        var issue = new IssueToProduction
+        {
+            ReceiptId = selectedReceipt.Id,
+            Qty = issueQty,
+            IssuedAt = DateTime.Now,
+            IssuedBy = CurrentUser.Name
+        };
+
+        using var db = DbFactory.CreateDbContext();
+        db.IssueToProductions.Add(issue);
+
+        // Увеличиваем выделенное количество
+        selectedReceipt.AllocatedQty += issueQty;
+
+        await db.SaveChangesAsync();
+
+        CloseIssueDialog();
+        await LoadData();
+    }
+}

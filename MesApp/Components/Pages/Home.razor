@@ -1,0 +1,139 @@
+@page "/"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Services
+@inject CurrentUser CurrentUser
+@inject NavigationManager Navigation
+
+<PageTitle>MES - Вход</PageTitle>
+
+@if (!CurrentUser.IsAuthenticated)
+{
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h3 class="card-title">Вход в систему MES</h3>
+                        <div class="mb-3">
+                            <label for="userSelect" class="form-label">Выберите пользователя:</label>
+                            <select @bind="selectedUser" class="form-select" id="userSelect">
+                                <option value="">-- Выберите --</option>
+                                @foreach (var user in UserService.Users)
+                                {
+                                    <option value="@($"{user.Name}|{user.Role}")">@user.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" @onclick="Login" disabled="@string.IsNullOrEmpty(selectedUser)">
+                            Войти
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="container mt-4">
+        <div class="alert alert-success">
+            <h4>Добро пожаловать, @CurrentUser.Name!</h4>
+            <p class="mb-2">Ваша роль: @GetRoleDisplay()</p>
+            <p class="mb-0">Используйте меню слева для работы с системой.</p>
+        </div>
+
+        @switch (CurrentUser.Role)
+        {
+            case "WAREHOUSE":
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Новая приёмка</h5>
+                                <p class="card-text">Создать новую приёмку материалов</p>
+                                <a href="/warehouse/new-receipt" class="btn btn-primary">Открыть</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Журнал приёмок</h5>
+                                <p class="card-text">Просмотр всех приёмок</p>
+                                <a href="/warehouse/receipts" class="btn btn-primary">Открыть</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                break;
+
+            case "QC":
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Входной контроль</h5>
+                        <p class="card-text">Материалы, ожидающие контроля ОТК</p>
+                        <a href="/qc/incoming" class="btn btn-warning">Открыть</a>
+                    </div>
+                </div>
+                break;
+
+            case "LAB":
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Заявки на испытания</h5>
+                        <p class="card-text">Управление лабораторными испытаниями</p>
+                        <a href="/lab/requests" class="btn btn-success">Открыть</a>
+                    </div>
+                </div>
+                break;
+
+            case "OPP":
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Задачи ОПП</h5>
+                        <p class="card-text">Подготовительные работы и планирование</p>
+                        <a href="/opp/jobs" class="btn btn-info">Открыть</a>
+                    </div>
+                </div>
+                break;
+        }
+    </div>
+}
+
+@code {
+    private string selectedUser = "";
+
+    private void Login()
+    {
+        if (!string.IsNullOrEmpty(selectedUser))
+        {
+            var parts = selectedUser.Split('|');
+            CurrentUser.Name = parts[0];
+            CurrentUser.Role = parts[1];
+
+            // Перенаправляем на соответствующую страницу роли
+            var redirectUrl = CurrentUser.Role switch
+            {
+                "WAREHOUSE" => "/warehouse/receipts",
+                "QC" => "/qc/incoming",
+                "LAB" => "/lab/requests",
+                "OPP" => "/opp/jobs",
+                _ => "/"
+            };
+
+            Navigation.NavigateTo(redirectUrl);
+        }
+    }
+
+    private string GetRoleDisplay()
+    {
+        return CurrentUser.Role switch
+        {
+            "WAREHOUSE" => "Кладовщик",
+            "QC" => "ОТК",
+            "LAB" => "ЦЗЛ",
+            "OPP" => "ОПП",
+            _ => CurrentUser.Role
+        };
+    }
+}

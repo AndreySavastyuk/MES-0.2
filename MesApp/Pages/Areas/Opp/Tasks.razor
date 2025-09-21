@@ -1,0 +1,97 @@
+@page "/opp/tasks"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h3>Задачи ОПП</h3>
+
+<div class="alert alert-info">
+    <h5>Отдел подготовки производства</h5>
+    <p>Функции модуля:</p>
+    <ul>
+        <li>Управление подготовительными работами</li>
+        <li>Планирование производственных заказов</li>
+        <li>Контроль выполнения задач</li>
+    </ul>
+    <p class="mb-0"><em>Модуль в разработке...</em></p>
+</div>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>№</th>
+            <th>Тип задачи</th>
+            <th>Статус</th>
+            <th>Владелец</th>
+            <th>Дата создания</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (prepJobs.Any())
+        {
+            @foreach (var job in prepJobs)
+            {
+                <tr>
+                    <td>@job.Id</td>
+                    <td>@GetJobKindDisplay(job.Kind)</td>
+                    <td>
+                        <span class="badge @GetStatusBadgeClass(job.Status)">
+                            @GetStatusDisplay(job.Status)
+                        </span>
+                    </td>
+                    <td>@job.Owner</td>
+                    <td>@job.CreatedAt.ToString("dd.MM.yyyy")</td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="5" class="text-center text-muted">Нет активных задач</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<PrepJob> prepJobs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = DbFactory.CreateDbContext();
+        prepJobs = await db.PrepJobs
+            .Include(p => p.Receipt)
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    private string GetJobKindDisplay(PrepKind kind) => kind switch
+    {
+        PrepKind.StockAnalysis => "Анализ запасов",
+        PrepKind.Nesting => "Раскрой",
+        PrepKind.HeatTreat => "Термообработка",
+        PrepKind.PreTests => "Предварительные тесты",
+        PrepKind.TurningForUT => "Обточка под УЗК",
+        _ => kind.ToString()
+    };
+
+    private string GetStatusDisplay(PrepStatus status) => status switch
+    {
+        PrepStatus.Planned => "Запланировано",
+        PrepStatus.InProgress => "В работе",
+        PrepStatus.Done => "Выполнено",
+        PrepStatus.Blocked => "Заблокировано",
+        _ => status.ToString()
+    };
+
+    private string GetStatusBadgeClass(PrepStatus status) => status switch
+    {
+        PrepStatus.Planned => "bg-primary",
+        PrepStatus.InProgress => "bg-warning text-dark",
+        PrepStatus.Done => "bg-success",
+        PrepStatus.Blocked => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

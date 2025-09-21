@@ -1,0 +1,137 @@
+@inherits LayoutComponentBase
+@using MesApp.Services
+@inject CurrentUser CurrentUser
+@inject IConfiguration Config
+@inject NotificationService NotificationService
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<div class="container-fluid h-100">
+    <div class="row h-100">
+        @if (CurrentUser.IsAuthenticated)
+        {
+            <!-- Левое меню: col-3 -->
+            <div class="col-3 bg-light border-end p-0">
+                <div class="p-3 border-bottom">
+                    <h5 class="mb-0">@GetRoleTitle()</h5>
+                </div>
+                <nav class="list-group list-group-flush">
+                    <NavMenu />
+                </nav>
+            </div>
+
+            <!-- Контент: col-9 -->
+            <div class="col-9 p-0 d-flex flex-column">
+                <!-- Заголовок -->
+                <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">MES System</h4>
+                    <div>
+                        <span class="me-3">@CurrentUser.Name</span>
+                        <a href="/" class="btn btn-sm btn-outline-secondary" @onclick="Logout">Выход</a>
+                    </div>
+                </div>
+
+                <!-- Основной контент -->
+                <main class="p-3 flex-grow-1 overflow-auto">
+                    <CascadingValue Value="NotificationService">
+                        @Body
+                    </CascadingValue>
+                </main>
+            </div>
+        }
+        else
+        {
+            <div class="col-12">
+                @Body
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Статусбар: фиксирован внизу -->
+@if (CurrentUser.IsAuthenticated)
+{
+    <div class="position-fixed bottom-0 start-0 w-100 bg-light border-top p-2">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col">
+                    <small class="text-muted">
+                        <span class="me-3">БД: @GetDbProvider()</span>
+                        <span class="me-3">Пользователь: @CurrentUser.Name</span>
+                        <span>@DateTime.Now.ToString("HH:mm:ss")</span>
+                    </small>
+                </div>
+                <div class="col-auto">
+                    <small class="text-muted">v1.0.0</small>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Notifications Toast Container -->
+<div class="toast-container position-fixed top-0 end-0 p-3">
+    @foreach (var notification in NotificationService.Notifications)
+    {
+        <div class="toast show" role="alert">
+            <div class="toast-header">
+                <span class="badge bg-@notification.Type me-2">●</span>
+                <strong class="me-auto">Уведомление</strong>
+                <small>@notification.Timestamp.ToString("HH:mm:ss")</small>
+                <button type="button" class="btn-close" @onclick="() => NotificationService.RemoveNotification(notification.Id)"></button>
+            </div>
+            <div class="toast-body">
+                @notification.Message
+            </div>
+        </div>
+    }
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        NotificationService.OnNotificationsChanged += StateHasChanged;
+    }
+
+    private void Logout()
+    {
+        CurrentUser.Name = "";
+        CurrentUser.Role = "";
+        Navigation.NavigateTo("/");
+    }
+
+    private string GetRoleTitle()
+    {
+        return CurrentUser.Role switch
+        {
+            "WAREHOUSE" => "Склад",
+            "QC" => "ОТК",
+            "LAB" => "ЦЗЛ",
+            "OPP" => "ОПП",
+            _ => "Меню"
+        };
+    }
+
+    private string GetDbProvider()
+    {
+        var provider = Config.GetValue<string>("Database:Provider") ?? "Sqlite";
+        return provider switch
+        {
+            "Sqlite" => "SQLite",
+            "Postgres" => "PostgreSQL",
+            "SqlServer" => "MS SQL",
+            _ => provider
+        };
+    }
+
+    public void Dispose()
+    {
+        NotificationService.OnNotificationsChanged -= StateHasChanged;
+    }
+}

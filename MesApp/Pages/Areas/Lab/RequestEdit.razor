@@ -1,0 +1,263 @@
+@page "/lab/request-edit"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using MesApp.ViewModels
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject IWebHostEnvironment Environment
+
+<h3>Управление испытанием</h3>
+
+@if (request != null)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>Материал: @request.Receipt.Item.Name</h5>
+            <p>Приёмка №@request.Receipt.Id от @request.Receipt.ReceivedAt.ToString("dd.MM.yyyy")</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label">Испытания</label>
+                <InputText @bind-Value="request.Tests" class="form-control" />
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <InputCheckbox @bind-Value="request.External" class="form-check-input" id="external"
+                           disabled="@(request.Status != "New")" />
+                    <label class="form-check-label" for="external">
+                        Внешняя лаборатория
+                    </label>
+                </div>
+            </div>
+
+            @if (request.External)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Название внешней лаборатории</label>
+                    <InputText @bind-Value="request.ExternalLabName" class="form-control" />
+                </div>
+            }
+
+            @if (!request.External)
+            {
+                @if (request.Status == "New")
+                {
+                    <button class="btn btn-success" @onclick="CompleteInternal">
+                        Завершить испытание
+                    </button>
+                }
+            }
+            else
+            {
+                @if (request.Status == "New")
+                {
+                    <button class="btn btn-warning" @onclick="SendToExternal">
+                        Отправлено во внешнюю
+                    </button>
+                }
+                else if (request.Status == "Sent")
+                {
+                    <button class="btn btn-primary" @onclick="() => showResultDialog = true">
+                        Результаты получены
+                    </button>
+                }
+            }
+
+            <button type="button" class="btn btn-secondary ms-2" @onclick="SaveChanges">Сохранить изменения</button>
+            <a href="/lab/requests" class="btn btn-light ms-2">Назад</a>
+        </div>
+    </div>
+
+    @if (showResultDialog)
+    {
+        <div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5)">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Результаты внешней лаборатории</h5>
+                    </div>
+                    <EditForm Model="@resultVm" OnValidSubmit="SaveAsync">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Протокол PDF</label>
+                                <InputFile OnChange="@LoadFile" class="form-control" accept=".pdf" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">№ протокола</label>
+                                <InputText @bind-Value="resultVm.ProtocolNo" class="form-control" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Результат</label>
+                                <InputRadioGroup @bind-Value="resultVm.Pass">
+                                    <div class="form-check form-check-inline">
+                                        <InputRadio Value="true" class="form-check-input" id="resultPass" />
+                                        <label class="form-check-label" for="resultPass">
+                                            Соответствует
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <InputRadio Value="false" class="form-check-input" id="resultFail" />
+                                        <label class="form-check-label" for="resultFail">
+                                            Не соответствует
+                                        </label>
+                                    </div>
+                                </InputRadioGroup>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Примечания</label>
+                                <InputTextArea @bind-Value="resultVm.Notes" class="form-control" rows="3" />
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="submit" class="btn btn-primary" disabled="@isProcessing">
+                                @if (isProcessing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Сохранить
+                            </button>
+                            <button type="button" class="btn btn-secondary" @onclick="() => showResultDialog = false">Отмена</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    }
+}
+else
+{
+    <div class="alert alert-warning">Заявка не найдена</div>
+}
+
+@code {
+    [SupplyParameterFromQuery] public int Id { get; set; }
+
+    private LabTestRequest? request;
+    private bool showResultDialog = false;
+    private IBrowserFile? file;
+    private LabTestResultViewModel resultVm = new();
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = DbFactory.CreateDbContext();
+        request = await db.LabTestRequests
+            .Include(r => r.Receipt)
+                .ThenInclude(r => r.Item)
+            .FirstOrDefaultAsync(r => r.Id == Id);
+
+        if (request != null)
+        {
+            resultVm.ProtocolNo = $"P-{request.Id}-{DateTime.Now:yyyyMMdd}";
+            resultVm.Pass = true;
+        }
+    }
+
+    private void LoadFile(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+    }
+
+    private async Task SaveChanges()
+    {
+        using var db = DbFactory.CreateDbContext();
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/lab/requests");
+    }
+
+    private async Task CompleteInternal()
+    {
+        if (request == null) return;
+
+        var result = new LabTestResult
+        {
+            LabTestRequestId = request.Id,
+            Pass = true,
+            ProtocolNo = $"P-{request.Id}-{DateTime.Now:yyyyMMdd}",
+            CompletedAt = DateTime.Now
+        };
+
+        using var db = DbFactory.CreateDbContext();
+        db.LabTestResults.Add(result);
+        request.Status = "Completed";
+
+        // Опционально меняем статус приёмки
+        if (request.Receipt.Status == ReceiptStatus.OnLab)
+        {
+            request.Receipt.Status = ReceiptStatus.Accepted;
+        }
+
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/lab/requests");
+    }
+
+    private async Task SendToExternal()
+    {
+        if (request == null) return;
+
+        request.Status = "Sent";
+        using var db = DbFactory.CreateDbContext();
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (request == null) return;
+
+        isProcessing = true;
+
+        try
+        {
+            string? reportPath = null;
+            if (file != null)
+            {
+                var uploadsFolder = Path.Combine(Environment.WebRootPath, "files", "reports");
+                Directory.CreateDirectory(uploadsFolder);
+
+                var uniqueFileName = $"{Guid.NewGuid()}.pdf";
+                var filePath = Path.Combine(uploadsFolder, uniqueFileName);
+
+                await using var stream = new FileStream(filePath, FileMode.Create);
+                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(stream);
+
+                reportPath = $"/files/reports/{uniqueFileName}";
+            }
+
+            var result = new LabTestResult
+            {
+                LabTestRequestId = request.Id,
+                Pass = resultVm.Pass,
+                ProtocolNo = resultVm.ProtocolNo,
+                ReportFilePath = reportPath,
+                CompletedAt = DateTime.Now
+            };
+
+            using var db = DbFactory.CreateDbContext();
+            db.LabTestResults.Add(result);
+            request.Status = "Completed";
+
+            // Опционально меняем статус приёмки
+            if (request.Receipt.Status == ReceiptStatus.OnLab && resultVm.Pass)
+            {
+                request.Receipt.Status = ReceiptStatus.Accepted;
+            }
+
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/lab/requests");
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+}

@@ -1,0 +1,246 @@
+@page "/opp/jobs"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using MesApp.Data
+@using MesApp.Domain
+@using MesApp.Services
+@using MesApp.ViewModels
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject CurrentUser CurrentUser
+
+<h3>Задачи ОПП</h3>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="() => showCreateDialog = true">
+        Новая задача ОПП
+    </button>
+</div>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>№</th>
+            <th>Тип задачи</th>
+            <th>Связанная приёмка</th>
+            <th>Статус</th>
+            <th>Владелец</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (jobs.Any())
+        {
+            @foreach (var job in jobs)
+            {
+                <tr>
+                    <td>@job.Id</td>
+                    <td>@GetJobKindDisplay(job.Kind)</td>
+                    <td>
+                        @if (job.Receipt != null)
+                        {
+                            <span>№@job.Receipt.Id - @job.Receipt.Item.Name</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">-</span>
+                        }
+                    </td>
+                    <td>
+                        <span class="badge @GetStatusBadgeClass(job.Status)">
+                            @GetStatusDisplay(job.Status)
+                        </span>
+                    </td>
+                    <td>@job.Owner</td>
+                    <td>
+                        @if (job.Status == PrepStatus.Planned)
+                        {
+                            <button class="btn btn-sm btn-warning" @onclick="() => StartJob(job)">
+                                Начать
+                            </button>
+                        }
+                        else if (job.Status == PrepStatus.InProgress)
+                        {
+                            <button class="btn btn-sm btn-success" @onclick="() => CompleteJob(job)">
+                                Готово
+                            </button>
+                        }
+                    </td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="6" class="text-center text-muted">Нет задач</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (showCreateDialog)
+{
+    <div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Новая задача ОПП</h5>
+                </div>
+                <EditForm Model="@jobVm" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Тип задачи</label>
+                            <InputSelect @bind-Value="jobVm.Kind" class="form-select">
+                                <option value="">-- Выберите --</option>
+                                <option value="StockAnalysis">Анализ запасов</option>
+                                <option value="Nesting">Раскрой</option>
+                                <option value="HeatTreat">Термообработка</option>
+                                <option value="PreTests">Предварительные тесты</option>
+                                <option value="TurningForUT">Обточка под УЗК</option>
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Связанная приёмка (опционально)</label>
+                            <InputSelect @bind-Value="jobVm.MaterialReceiptId" class="form-select">
+                                <option value="0">-- Без связи --</option>
+                                @foreach (var receipt in acceptedReceipts)
+                                {
+                                    <option value="@receipt.Id">№@receipt.Id - @receipt.Item.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Примечания</label>
+                            <InputTextArea @bind-Value="jobVm.Notes" class="form-control" rows="3" />
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Создать
+                        </button>
+                        <button type="button" class="btn btn-secondary" @onclick="CloseCreateDialog">Отмена</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PrepJob> jobs = new();
+    private List<MaterialReceipt> acceptedReceipts = new();
+    private bool showCreateDialog = false;
+    private PrepJobViewModel jobVm = new();
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        using var db1 = DbFactory.CreateDbContext();
+        jobs = await db1.PrepJobs
+            .Include(p => p.Receipt)
+                .ThenInclude(r => r!.Item)
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+
+        using var db2 = DbFactory.CreateDbContext();
+        acceptedReceipts = await db2.MaterialReceipts
+            .Include(r => r.Item)
+            .Where(r => r.Status == ReceiptStatus.Accepted)
+            .OrderByDescending(r => r.ReceivedAt)
+            .ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        isProcessing = true;
+
+        try
+        {
+            // Convert string enum value to PrepKind enum
+            var kind = Enum.Parse<PrepKind>(jobVm.Kind);
+
+            var job = new PrepJob
+            {
+                Kind = kind,
+                Status = PrepStatus.Planned,
+                MaterialReceiptId = jobVm.MaterialReceiptId == 0 ? null : jobVm.MaterialReceiptId,
+                Notes = jobVm.Notes,
+                Owner = CurrentUser.Name,
+                CreatedAt = DateTime.Now
+            };
+
+            using var db = DbFactory.CreateDbContext();
+            db.PrepJobs.Add(job);
+            await db.SaveChangesAsync();
+
+            CloseCreateDialog();
+            await LoadData();
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private void CloseCreateDialog()
+    {
+        showCreateDialog = false;
+        jobVm = new PrepJobViewModel();
+    }
+
+    private async Task StartJob(PrepJob job)
+    {
+        job.Status = PrepStatus.InProgress;
+        using var db = DbFactory.CreateDbContext();
+        await db.SaveChangesAsync();
+        await LoadData();
+    }
+
+    private async Task CompleteJob(PrepJob job)
+    {
+        job.Status = PrepStatus.Done;
+        using var db = DbFactory.CreateDbContext();
+        await db.SaveChangesAsync();
+        await LoadData();
+    }
+
+    private string GetJobKindDisplay(PrepKind kind) => kind switch
+    {
+        PrepKind.StockAnalysis => "Анализ запасов",
+        PrepKind.Nesting => "Раскрой",
+        PrepKind.HeatTreat => "Термообработка",
+        PrepKind.PreTests => "Предварительные тесты",
+        PrepKind.TurningForUT => "Обточка под УЗК",
+        _ => kind.ToString()
+    };
+
+    private string GetStatusDisplay(PrepStatus status) => status switch
+    {
+        PrepStatus.Planned => "Запланировано",
+        PrepStatus.InProgress => "В работе",
+        PrepStatus.Done => "Выполнено",
+        PrepStatus.Blocked => "Заблокировано",
+        _ => status.ToString()
+    };
+
+    private string GetStatusBadgeClass(PrepStatus status) => status switch
+    {
+        PrepStatus.Planned => "bg-primary",
+        PrepStatus.InProgress => "bg-warning text-dark",
+        PrepStatus.Done => "bg-success",
+        PrepStatus.Blocked => "bg-danger",
+        _ => "bg-secondary"
+    };
+}
