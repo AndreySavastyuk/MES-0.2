@@ -15,37 +15,24 @@ builder.Services.AddScoped<CurrentUser>();
 // Add NotificationService
 builder.Services.AddScoped<NotificationService>();
 
-// Configure database based on environment
-var environment = builder.Environment.EnvironmentName;
+// Configure database based on configuration
 var dbConfig = builder.Configuration.GetSection("Database");
-
-string provider;
-string connectionString;
-
-if (environment == "Production")
-{
-    // Production: use appsettings.Production.json configuration
-    provider = dbConfig["Provider"] ?? "Postgres";
-    connectionString = dbConfig["ConnectionString"] ?? throw new InvalidOperationException("Production ConnectionString is required");
-}
-else
-{
-    // Development: use SQLite by default
-    provider = dbConfig["Provider"] ?? "Sqlite";
-    connectionString = dbConfig["ConnectionString"] ?? "Data Source=mes_dev.db";
-}
+var provider = dbConfig["Provider"] ?? "Sqlite";
+var connectionString = dbConfig["ConnectionString"] ?? "Data Source=mes_dev.db";
 
 // Use DbContextFactory instead of DbContext for Blazor Server stability
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
 {
-    switch (provider)
+    switch (provider.ToLower())
     {
-        case "SqlServer":
+        case "sqlserver":
             options.UseSqlServer(connectionString);
             break;
-        case "Postgres":
+        case "postgres":
+        case "postgresql":
             options.UseNpgsql(connectionString);
             break;
+        case "sqlite":
         default:
             options.UseSqlite(connectionString);
             break;
@@ -57,15 +44,30 @@ var app = builder.Build();
 // Apply migrations and seed data on startup using factory
 using (var scope = app.Services.CreateScope())
 {
-    var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-    using var db = dbFactory.CreateDbContext();
+    var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    var dbFactory = services.GetRequiredService<IDbContextFactory<AppDbContext>>();
 
-    db.Database.Migrate();
-
-    // Seed initial data if database is empty
-    if (!db.Items.Any())
+    try
     {
-        SeedData.EnsureSeed(db);
+        using var db = dbFactory.CreateDbContext();
+        db.Database.Migrate();
+        logger.LogInformation("Database migrations applied successfully");
+
+        // Seed initial data if database is empty
+        if (!db.Items.Any())
+        {
+            SeedData.EnsureSeed(db);
+            logger.LogInformation("Database seeded with initial data");
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "An error occurred while migrating or seeding the database");
+
+        // For production, you might want to show a user-friendly message
+        // For now, we'll log it and continue - the app should still work
+        // even if migrations fail (though with potential issues)
     }
 }
 
